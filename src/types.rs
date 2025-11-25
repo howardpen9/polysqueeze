@@ -695,8 +695,8 @@ impl From<GammaMarket> for Market {
             active: gamma.active,
             closed: gamma.closed,
             question_id: gamma.condition_id.clone(),
-            minimum_order_size: Decimal::ZERO,
-            minimum_tick_size: Decimal::ZERO,
+            minimum_order_size: gamma.order_min_size.unwrap_or(Decimal::ZERO),
+            minimum_tick_size: gamma.order_tick_size.unwrap_or(Decimal::ZERO),
             description: gamma.description.unwrap_or_default(),
             category: gamma.category.clone(),
             end_date_iso: gamma.end_date.clone(),
@@ -1228,7 +1228,7 @@ impl GammaListParams {
 /// Gamma API event metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GammaEvent {
-    #[serde(rename = "event_id")]
+    #[serde(alias = "event_id")]
     pub id: String,
     pub slug: String,
     pub name: Option<String>,
@@ -1241,10 +1241,25 @@ pub struct GammaEvent {
     #[serde(default)]
     pub tags: Vec<Tag>,
     #[serde(default)]
-    pub markets: Vec<SimplifiedMarket>,
+    pub markets: Vec<GammaEventMarket>,
     #[serde(default)]
     #[serde(flatten)]
     pub metadata: serde_json::Value,
+}
+
+/// Lightweight market info returned inside a Gamma event listing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GammaEventMarket {
+    #[serde(rename = "conditionId")]
+    pub condition_id: String,
+    #[serde(rename = "id")]
+    #[serde(default)]
+    pub market_id: Option<String>,
+    #[serde(rename = "clobTokenIds")]
+    #[serde(default)]
+    pub clob_token_ids: Option<String>,
+    #[serde(default)]
+    pub slug: Option<String>,
 }
 
 /// Tag metadata for Gamma API filtering
@@ -1329,6 +1344,10 @@ pub struct GammaMarket {
     pub liquidity_amm: Option<Decimal>,
     #[serde(rename = "liquidityClob")]
     pub liquidity_clob: Option<Decimal>,
+    #[serde(rename = "orderMinSize")]
+    pub order_min_size: Option<Decimal>,
+    #[serde(rename = "orderPriceMinTickSize")]
+    pub order_tick_size: Option<Decimal>,
 }
 
 /// Rewards structure for markets

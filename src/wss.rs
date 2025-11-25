@@ -183,6 +183,7 @@ pub struct LastTradeMessage {
 
 /// Simple stats for monitoring connection health.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct WssStats {
     pub messages_received: u64,
     pub errors: u64,
@@ -190,16 +191,6 @@ pub struct WssStats {
     pub last_message_time: Option<DateTime<Utc>>,
 }
 
-impl Default for WssStats {
-    fn default() -> Self {
-        Self {
-            messages_received: 0,
-            errors: 0,
-            reconnect_count: 0,
-            last_message_time: None,
-        }
-    }
-}
 
 /// Reconnecting client for the market channel.
 pub struct WssMarketClient {
@@ -209,6 +200,12 @@ pub struct WssMarketClient {
     stats: WssStats,
     disconnect_history: VecDeque<DateTime<Utc>>,
     pending_events: VecDeque<WssMarketEvent>,
+}
+
+impl Default for WssMarketClient {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WssMarketClient {
@@ -305,10 +302,9 @@ impl WssMarketClient {
     }
 
     fn reconnect_delay(&self, attempts: u32) -> Duration {
-        let millis = BASE_RECONNECT_DELAY.as_millis() as u128 * attempts as u128;
-        let desired =
-            Duration::from_millis(millis.min(MAX_RECONNECT_DELAY.as_millis() as u128) as u64);
-        desired
+        let millis = BASE_RECONNECT_DELAY.as_millis() * attempts as u128;
+        
+        Duration::from_millis(millis.min(MAX_RECONNECT_DELAY.as_millis()) as u64)
     }
 
     async fn ensure_connection(&mut self) -> Result<()> {
@@ -500,10 +496,9 @@ impl WssUserClient {
     }
 
     fn reconnect_delay(&self, attempts: u32) -> Duration {
-        let millis = BASE_RECONNECT_DELAY.as_millis() as u128 * attempts as u128;
-        let desired =
-            Duration::from_millis(millis.min(MAX_RECONNECT_DELAY.as_millis() as u128) as u64);
-        desired
+        let millis = BASE_RECONNECT_DELAY.as_millis() * attempts as u128;
+        
+        Duration::from_millis(millis.min(MAX_RECONNECT_DELAY.as_millis()) as u64)
     }
 
     async fn ensure_connection(&mut self) -> Result<()> {

@@ -26,7 +26,6 @@ const DEFAULT_GAMMA_BASE: &str = "https://gamma-api.polymarket.com";
 const DEFAULT_WS_BASE: &str = "wss://ws-subscriptions-clob.polymarket.com/ws/";
 const DEFAULT_RTDS_BASE: &str = "wss://ws-live-data.polymarket.com";
 const GAMMA_MARKETS_LIMIT: u32 = 50;
-const GAMMA_SNIPPET_LENGTH: usize = 512;
 
 // Re-export types for compatibility
 pub use crate::types::{ApiCredentials as ApiCreds, OrderType, Side};
@@ -101,15 +100,6 @@ impl ClobClient {
             .ok()
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .and_then(|s| s.parse::<u64>().ok())
-    }
-
-    fn format_gamma_response(body: &str) -> String {
-        if body.len() <= GAMMA_SNIPPET_LENGTH {
-            return body.to_string();
-        }
-
-        let snippet: String = body.chars().take(GAMMA_SNIPPET_LENGTH).collect();
-        format!("{}… ({} bytes total)", snippet, body.len())
     }
 
     fn build_url(base: &str, path: &str) -> String {
@@ -1554,14 +1544,14 @@ impl ClobClient {
 
         // Always enforce a minimum liquidity threshold (default 10,000 when not specified).
         let liquidity_min = params
-            .and_then(|options| options.liquidity_num_min.clone())
+            .and_then(|options| options.liquidity_num_min)
             .unwrap_or_else(|| Decimal::from(10_000));
         query.push(("liquidity_num_min", liquidity_min.to_string()));
 
         // Default end date to at least three weeks from now.
         let min_end_date = Utc::now() + Duration::weeks(3);
         let end_date_max = params
-            .and_then(|options| options.end_date_max.clone())
+            .and_then(|options| options.end_date_max)
             .unwrap_or(min_end_date);
         let end_date_max = if end_date_max < min_end_date {
             min_end_date
@@ -1570,7 +1560,7 @@ impl ClobClient {
         };
         query.push(("end_date_max", end_date_max.to_rfc3339()));
 
-        if let Some(start_date_min) = params.and_then(|options| options.start_date_min.clone()) {
+        if let Some(start_date_min) = params.and_then(|options| options.start_date_min) {
             query.push(("start_date_min", start_date_min.to_rfc3339()));
         }
 
@@ -1620,12 +1610,6 @@ impl ClobClient {
             .await
             .map_err(|e| PolyError::parse(format!("Failed to read response body: {}", e), None))?;
 
-        tracing::debug!(
-            snippet = Self::format_gamma_response(&body),
-            total_bytes = body.len(),
-            "Gamma markets response"
-        );
-
         let gamma_markets: Vec<crate::types::GammaMarket> = serde_json::from_str(&body)
             .map_err(|e| PolyError::parse(format!("Failed to parse response: {}", e), None))?;
 
@@ -1670,18 +1654,35 @@ impl ClobClient {
     }
 
     /// Get single market by condition ID
-    pub async fn get_market(&self, condition_id: &str) -> Result<crate::types::Market> {
+    pub async fn get_market(&self, market_id: &str) -> Result<crate::types::Market> {
         let response = self
             .http_client
-            .get(self.gamma_url(&format!("markets/{}", condition_id)))
+            .get(self.gamma_url(&format!("markets/{}", market_id)))
             .send()
             .await
             .map_err(|e| PolyError::network(format!("Request failed: {}", e), e))?;
 
-        response
-            .json::<crate::types::Market>()
+        if !response.status().is_success() {
+            return Err(PolyError::api(
+                response.status().as_u16(),
+                "Failed to fetch Gamma market",
+            ));
+        }
+
+        let body = response
+            .text()
             .await
-            .map_err(|e| PolyError::parse(format!("Failed to parse response: {}", e), None))
+            .map_err(|e| PolyError::parse(format!("Failed to read response body: {}", e), None))?;
+
+        let gamma_market = serde_json::from_str::<crate::types::GammaMarket>(&body)
+            .map_err(|err| {
+                PolyError::parse(
+                    format!("Failed to parse market {}: {}", market_id, err),
+                    None,
+                )
+            })?;
+
+        Ok(gamma_market.into())
     }
 
     /// Get market trades events
@@ -1735,6 +1736,28 @@ impl ClobClient {
         let response = self
             .http_client
             .get(self.gamma_url(&format!("events/slug/{}", slug)))
+            .send()
+            .await
+            .map_err(|e| PolyError::network(format!("Request failed: {}", e), e))?;
+
+        if !response.status().is_success() {
+            return Err(PolyError::api(
+                response.status().as_u16(),
+                "Failed to fetch Gamma event",
+            ));
+        }
+
+        response
+            .json::<crate::types::GammaEvent>()
+            .await
+            .map_err(|e| PolyError::parse(format!("Failed to parse response: {}", e), None))
+    }
+
+    /// Fetch a single Gamma event by numeric ID
+    pub async fn get_event_by_id(&self, event_id: &str) -> Result<crate::types::GammaEvent> {
+        let response = self
+            .http_client
+            .get(self.gamma_url(&format!("events/{}", event_id)))
             .send()
             .await
             .map_err(|e| PolyError::network(format!("Request failed: {}", e), e))?;
@@ -1810,8 +1833,9 @@ impl ClobClient {
             value
         };
 
-        serde_json::from_value::<Vec<T>>(payload)
-            .map_err(|e| PolyError::parse(format!("Failed to parse {}: {}", ctx, e), None))
+        serde_json::from_value::<Vec<T>>(payload).map_err(|err| {
+            PolyError::parse(format!("Failed to parse {}: {}", ctx, err), None)
+        })
     }
 }
 
