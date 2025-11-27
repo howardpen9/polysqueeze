@@ -165,6 +165,7 @@ impl ClobClient {
             api_creds: Some(api_creds),
             order_builder: Some(order_builder),
         }
+        .with_env_funder()
     }
 
     /// Set API credentials
@@ -184,6 +185,14 @@ impl ClobClient {
 
         order_builder.set_funder(address);
         Ok(())
+    }
+
+    fn with_env_funder(mut self) -> Self {
+        if let Ok(funder) = env::var("POLY_FUNDER") {
+            self.set_funder(&funder)
+                .unwrap_or_else(|err| panic!("Failed to set funder from POLY_FUNDER: {}", err));
+        }
+        self
     }
 
     /// Override the Gamma API base URL
@@ -793,7 +802,10 @@ impl ClobClient {
         if !response.status().is_success() {
             return Err(PolyError::api(
                 response.status().as_u16(),
-                format!("Failed to post batch orders: {}", response.text().await.unwrap()),
+                format!(
+                    "Failed to post batch orders: {}",
+                    response.text().await.unwrap()
+                ),
             ));
         }
 
@@ -1724,8 +1736,8 @@ impl ClobClient {
             .await
             .map_err(|e| PolyError::parse(format!("Failed to read response body: {}", e), None))?;
 
-        let gamma_market = serde_json::from_str::<crate::types::GammaMarket>(&body)
-            .map_err(|err| {
+        let gamma_market =
+            serde_json::from_str::<crate::types::GammaMarket>(&body).map_err(|err| {
                 PolyError::parse(
                     format!("Failed to parse market {}: {}", market_id, err),
                     None,
@@ -1883,9 +1895,8 @@ impl ClobClient {
             value
         };
 
-        serde_json::from_value::<Vec<T>>(payload).map_err(|err| {
-            PolyError::parse(format!("Failed to parse {}: {}", ctx, err), None)
-        })
+        serde_json::from_value::<Vec<T>>(payload)
+            .map_err(|err| PolyError::parse(format!("Failed to parse {}: {}", ctx, err), None))
     }
 }
 
